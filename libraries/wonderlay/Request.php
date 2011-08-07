@@ -4,13 +4,12 @@ namespace wonderlay;
 
 /**
  * This is the request object that will organize data comming from superglobals
- * like $_GET, $_POST, $_SERVER and so on. The data from this object will help
- * the router to decide what to load or execute.
+ * like $_GET, $_POST, $_SERVER and so on.
  *
  * @todo Implement detectors creating a new method like `Request::is('mobile')`
  *       with the ability to change or extend the way these detectors work.
  * @todo Parse and organize the Accep-* headers so we can use it to return the
- *       correct request document.
+ *       correct requested document.
  */
 class Request {
 
@@ -113,7 +112,7 @@ class Request {
     protected $_isHttp = false;
 
     /**
-     * Flat to define if this is a command line request.
+     * Flag to define if this is a command line request.
      *
      * @var bool
      */
@@ -121,8 +120,7 @@ class Request {
 
     /**
      * Pulls request data from superglobals and tries to normalize it. This will
-     * also work for CLI requests like:
-     * `php /path/to/app/index.php -u /module/action/param`
+     * also work for CLI requests.
      *
      * @return void
      */
@@ -165,7 +163,7 @@ class Request {
             $this->headers = $this->_formatHeaders();
             $this->ip = $this->_getIp();
         } else {
-            // Here we are dealing with a cli request
+            // Here we are dealing with a CLI request
             $this->_isCli = true;
             $this->scheme = 'cli';
 
@@ -188,12 +186,12 @@ class Request {
     }
 
     /**
-     * Here we expose protected attributes of the request object. If the
-     * attribute is not present, we look for it on the `$params` array.
+     * Here we expose protected attributes of the object. If the attribute is
+     * not present, we look for it on the `$params` array.
      *
      * @param string $attr The object attribute/param key to return.
      * @return mixed Returns the object attribute, or value of `$params[$attr]`
-     *         or null if nothing is found.
+     *         or `null` if nothing is found.
      */
     public function __get($attr) {
         if (strpos($attr, '_') !== 0 && isset($this->{$attr})) {
