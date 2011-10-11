@@ -74,14 +74,14 @@ class Request {
      *
      * @var strng
      */
-    protected $uri = '/';
+    protected $self = '/';
 
     /**
      * Params for request.
      *
      * @var array
      */
-    protected $params = array();
+    protected $_params = array();
 
     /**
      * Request referer.
@@ -125,6 +125,18 @@ class Request {
      * @return void
      */
     public function __construct() {
+        // Handling magic quotes...
+        if (get_magic_quotes_gpc()) {
+            $stripslashesGpc = function(&$value, $key) {
+                $value = stripslashes($value);
+            };
+
+            array_walk_recursive($_GET, $stripslashesGpc);
+            array_walk_recursive($_POST, $stripslashesGpc);
+            array_walk_recursive($_COOKIE, $stripslashesGpc);
+            array_walk_recursive($_REQUEST, $stripslashesGpc);
+        }
+
         // We are dealing with a http request
         if (isset($_SERVER['HTTP_HOST'])) {
             $this->_isHttp = true;
@@ -139,7 +151,7 @@ class Request {
             $this->method = $_SERVER['REQUEST_METHOD'];
 
             // Emulating REST for browsers
-            if (!empty($_POST['_method'])) {
+            if ($this->method === 'POST' && !empty($_POST['_method'])) {
                 $this->method = strtoupper($_POST['_method']);
             }
 
@@ -150,7 +162,7 @@ class Request {
                 unset($_GET['url']);
             }
 
-            $this->uri = $_SERVER['REQUEST_URI'];
+            $this->self = $_SERVER['REQUEST_URI'];
 
             if (!empty($_SERVER['HTTP_REFERER'])) {
                 $this->referrer = $_SERVER['HTTP_REFERER'];
@@ -170,7 +182,7 @@ class Request {
             $args = getopt('u:');
 
             if (!empty($args['u'])) {
-                $this->uri = $args['u'];
+                $this->self = $args['u'];
 
                 $query = parse_url($args['u'], PHP_URL_QUERY);
 
@@ -187,17 +199,17 @@ class Request {
 
     /**
      * Here we expose protected attributes of the object. If the attribute is
-     * not present, we look for it on the `$params` array.
+     * not present, we look for it on the `$_params` array.
      *
      * @param string $attr The object attribute/param key to return.
-     * @return mixed Returns the object attribute, or value of `$params[$attr]`
-     *         or `null` if nothing is found.
+     * @return mixed Returns the object attribute or value of `$params[$attr]`
+     *               or `null` if nothing is found.
      */
     public function __get($attr) {
         if (strpos($attr, '_') !== 0 && isset($this->{$attr})) {
             return $this->{$attr};
-        } elseif (!empty($this->params[$attr])) {
-            return $this->params[$attr];
+        } elseif (!empty($this->_params[$attr])) {
+            return $this->_params[$attr];
         }
 
         return null;
@@ -211,21 +223,33 @@ class Request {
      * @param mixed $value The value associated with the given key.
      * @return void
      */
-    public function setParam($key, $value = null) {
+    public function setParams($key, $value = null) {
         if (is_array($key)) {
-            $this->params += $key;
+            $this->_params = array_merge($this->_params, $key);
         } else {
-            $this->params[$key] = $value;
+            $this->_params[$key] = $value;
         }
     }
 
     /**
-     * Checks if the request method is POST
+     * Return param value
      *
-     * @return bool
+     * @param string $key This can be a string definig the parameter to get or
+     *                    if it is `null` we just return all the parameters.
+     * @param mixed $default If we can't find the specified key, we return this
+     *                       value.
+     * @return mixed
      */
-    public function isPost() {
-        return $this->method === 'POST';
+    public function param($key = null, $default = null) {
+        if (is_null($key)) {
+            return $this->_params;
+        }
+
+        if (!empty($this->_params[$key])) {
+            return $this->_params[$key];
+        }
+
+        return $default;
     }
 
     /**
@@ -235,6 +259,15 @@ class Request {
      */
     public function isGet() {
         return $this->method === 'GET';
+    }
+
+    /**
+     * Checks if the request method is POST
+     *
+     * @return bool
+     */
+    public function isPost() {
+        return $this->method === 'POST';
     }
 
     /**
@@ -253,15 +286,6 @@ class Request {
      */
     public function isDelete() {
         return $this->method === 'DELETE';
-    }
-
-    /**
-     * Checks if the request method is HEAD
-     *
-     * @return bool
-     */
-    public function isHead() {
-        return $this->method === 'HEAD';
     }
 
     /**
@@ -342,7 +366,6 @@ class Request {
                     $key = str_replace('_', ' ', $key);
                     $key = ucwords($key);
                     $key = str_replace(' ', '-', $key);
-                    $key = $key === 'Content-Md5' ? 'Content-MD5' : $key;
 
                     $headers[$key] = $value;
                 }
@@ -359,19 +382,27 @@ class Request {
      * @return string
      */
     protected function _getIp() {
-        // check for shared internet/ISP IP
-        if (!empty($_SERVER['HTTP_CLIENT_IP'])
-        && $this->_validateIp($_SERVER['HTTP_CLIENT_IP'])) {
+        // Helper function to validate IP addresses
+        $validate = function($ip) {
+            if (filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4 | FILTER_FLAG_IPV6 | FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE) === false) {
+                return false;
+            }
+
+            return true;
+        };
+
+        // Check for shared internet/ISP IP
+        if (!empty($_SERVER['HTTP_CLIENT_IP']) && $validate($_SERVER['HTTP_CLIENT_IP'])) {
             return $_SERVER['HTTP_CLIENT_IP'];
         }
 
-        // check for IPs passing through proxies
+        // Check for IPs passing through proxies
         if (!empty($_SERVER['HTTP_X_FORWARDED_FOR'])) {
-            // check if multiple ips exist in var
+            // Check if multiple IPs exist in var
             $iplist = explode(',', $_SERVER['HTTP_X_FORWARDED_FOR']);
 
             foreach ($iplist as $ip) {
-                if ($this->_validateIp($ip)) {
+                if ($validate($ip)) {
                     return $ip;
                 }
             }
@@ -385,27 +416,12 @@ class Request {
         );
 
         foreach ($check as $c) {
-            if (!empty($_SERVER[$c])) && $this->_validateIp($_SERVER[$c])) {
+            if (!empty($_SERVER[$c]) && $validate($_SERVER[$c])) {
                 return $_SERVER[$c];
             }
         }
 
-        // return unreliable ip since all else failed
+        // Return unreliable ip since all else failed
         return $_SERVER['REMOTE_ADDR'];
-    }
-
-    /**
-     * Checks if an IP address is valid
-     *
-     * @return bool
-     */
-    protected function validateIp($ip) {
-        if (filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4 |
-        FILTER_FLAG_IPV6 | FILTER_FLAG_NO_PRIV_RANGE |
-        FILTER_FLAG_NO_RES_RANGE) === false) {
-            return false;
-        }
-
-        return true;
     }
 }
